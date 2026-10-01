@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Trading Hub</title>
+  <style>
+    body {
+      background-color: #0e0e12;
+      color: #ffffff;
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 15px;
+      text-align: center;
+    }
+    .card {
+      background-color: #181c24;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 15px auto;
+      max-width: 450px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+    .btn {
+      background-color: #ff444f;
+      color: white;
+      border: none;
+      padding: 12px 20px;
+      font-size: 1em;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 8px;
+      font-weight: bold;
+    }
+    .btn-buy { background-color: #4bb543; }
+    .btn-sell { background-color: #ff444f; }
+    .status { color: #00e676; margin: 10px 0; }
+    .price { font-size: 2em; font-weight: bold; margin: 15px 0; }
+    select, input {
+      padding: 8px;
+      border-radius: 4px;
+      border: 1px solid #333;
+      background: #222;
+      color: #fff;
+      margin: 5px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h2>My Trading Hub</h2>
+    <div id="auth-section">
+      <button class="btn" onclick="loginWithDeriv()">Log In with Deriv</button>
+    </div>
+    <div id="user-info" style="display:none;">
+      <p>Account: <strong id="acc-id">-</strong> | Balance: <strong id="acc-balance">-</strong></p>
+    </div>
+    <div id="status" class="status">Connecting to WebSocket...</div>
+  </div>
+
+  <div class="card">
+    <h3>Live Market Price</h3>
+    <select id="symbol-select" onchange="subscribeTicks()">
+      <option value="R_100">Volatility 100 Index</option>
+      <option value="R_50">Volatility 50 Index</option>
+      <option value="frxEURUSD">EUR/USD</option>
+    </select>
+    <div id="tick-price" class="price">0.00</div>
+  </div>
+
+  <div class="card">
+    <h3>Execute Trade</h3>
+    <label>Stake ($): </label>
+    <input type="number" id="stake" value="10" min="1"><br><br>
+    <button class="btn btn-buy" onclick="placeTrade('CALL')">BUY (Rise)</button>
+    <button class="btn btn-sell" onclick="placeTrade('PUT')">SELL (Fall)</button>
+    <p id="trade-result"></p>
+  </div>
+
+  <script>
+    const APP_ID = '34yqguMoomzjEFCrdww9T';
+    let socket = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`);
+    let token = null;
+    let currentSubscriptionId = null;
+
+    socket.onopen = () => {
+      document.getElementById('status').innerText = 'Connected to Deriv Server';
+      checkOAuthToken();
+      subscribeTicks();
+    };
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      // Handle Authentication Response
+      if (data.msg_type === 'authorize') {
+        if (data.error) {
+          document.getElementById('status').innerText = 'Auth Error: ' + data.error.message;
+        } else {
+          document.getElementById('auth-section').style.display = 'none';
+          document.getElementById('user-info').style.display = 'block';
+          document.getElementById('acc-id').innerText = data.authorize.loginid;
+          document.getElementById('acc-balance').innerText = `${data.authorize.balance} ${data.authorize.currency}`;
+          document.getElementById('status').innerText = 'Authorized & Live';
+        }
+      }
+
+      // Handle Price Ticks
+      if (data.msg_type === 'tick') {
+        document.getElementById('tick-price').innerText = data.tick.quote;
+      }
+
+      // Handle Trade Execution Response
+      if (data.msg_type === 'buy') {
+        if (data.error) {
+          document.getElementById('trade-result').innerText = 'Trade Error: ' + data.error.message;
+        } else {
+          document.getElementById('trade-result').innerText = 'Trade Placed! Contract ID: ' + data.buy.contract_id;
+        }
+      }
+    };
+
+    // OAuth 2.0 Login Function
+    function loginWithDeriv() {
+      const redirectUri = window.location.origin + window.location.pathname;
+      window.location.href = `https://oauth.deriv.com/oauth2/authorize?app_id=${APP_ID}&l=EN`;
+    }
+
+    // Check URL parameters for OAuth Token upon redirect
+    function checkOAuthToken() {
+      const urlParams = new URLSearchParams(window.location.search);
+      token = urlParams.get('token1');
+
+      if (token) {
+        socket.send(JSON.stringify({ authorize: token }));
+      }
+    }
+
+    // Subscribe to Live Market Ticks
+    function subscribeTicks() {
+      const symbol = document.getElementById('symbol-select').value;
+      
+      // Forget previous price stream
+      socket.send(JSON.stringify({ forget_all: 'ticks' }));
+
+      // Request new price stream
+      socket.send(JSON.stringify({
+        ticks: symbol,
+        subscribe: 1
+      }));
+    }
+
+    // Place Rise/Fall Trade
+    function placeTrade(contractType) {
+      if (!token) {
+        alert('Please log in with your Deriv account first to execute trades.');
+        return;
+      }
+
+      const symbol = document.getElementById('symbol-select').value;
+      const stake = parseFloat(document.getElementById('stake').value);
+
+      socket.send(JSON.stringify({
+        buy: 1,
+        price: stake,
+        parameters: {
+          amount: stake,
+          basis: 'stake',
+          contract_type: contractType,
+          currency: 'USD',
+          duration: 5,
+          duration_unit: 't',
+          symbol: symbol
+        }
+      }));
+    }
+  </script>
+
+</body>
+</html>
